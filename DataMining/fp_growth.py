@@ -7,12 +7,14 @@ class FPNode:
         self.children=[]
     def add(self):
         self.count+=1
+
     def show(self,indent):
         print(" "*indent+self.id+" "+str(self.count))
         indent+=2
         for node in self.children:
             node.show(indent)
-    def mergenodes(self,minsup):
+
+    def mergenodes(self):
         ids=[i.id for i in self.children]
         if len(ids) == 0:
             return
@@ -30,7 +32,8 @@ class FPNode:
         del self.children
         self.children=newchildren
         for node in self.children:
-            node.mergenodes(minsup)
+            node.mergenodes()
+
     def delete(self):
         self.parent.children.remove(self)
         for i in self.children:
@@ -46,7 +49,7 @@ class FP_Growth:
         self.dataset=dataset
         self.FPTree=None
         self.patterns=[]
-        self.itemset=[]
+
     def createfreqset(self):
         rawset={}
         for row in self.dataset:
@@ -58,7 +61,7 @@ class FP_Growth:
 
         self.freqset={i:j for i,j in rawset.items() if j>=self.minsup}
         self.linktable={i[0]:[] for i in sorted(self.freqset.items(),key=lambda x:x[1])}
-        self.itemset=list(self.linktable.keys())
+
     def getfreq(self,elem):
         return self.freqset[elem]
 
@@ -66,7 +69,7 @@ class FP_Growth:
         self.FPTree=FPNode("Root",0,None)
         for row in self.dataset:
             row=[i for i in row if i in self.freqset.keys()]
-            row.sort(key=self.getfreq,reverse=True)
+            row.sort(key=lambda x:self.freqset[x] ,reverse=True)
             pnode=self.FPTree
             for item in row:
                 flag=False
@@ -99,16 +102,17 @@ class FP_Growth:
                 pnode=pnode.parent
             nnode.parent=contree
             contree.children.append(nnode)
-        contree.mergenodes(self.minsup)
+        contree.mergenodes()
         contable={}
         freqdict={}
         self.createcontable(contree,contable,freqdict)
-        contable=dict(sorted(contable.items(),key=lambda x:self.freqset[x[0]]))
+        contable=dict(sorted(contable.items(),key=lambda x:freqdict[x[0]]))
         for (k,v) in freqdict.items():
             if v>=self.minsup:
                 self.patterns.append([prefix+[k],v])
-        for i in contable.keys():
-            self.createcontree(i,prefix+[i],contable)
+                self.createcontree(k, prefix + [k], contable)
+        # for i in contable.keys():
+        #     self.createcontree(i,prefix+[i],contable)
         #contree.show(0)
         #self.findpattern([id],contree)
 
@@ -131,6 +135,68 @@ class FP_Growth:
             for i in contree.children:
                 self.createcontable(i, contable,freqdict)
 
+    # def findpattern(self,prefix,tree):
+    #     freqdict={}
+    #     nodelist=[]
+    #     if len(tree.children)==0:
+    #         return
+    #     for n in tree.children:
+    #         nodelist.append(n)
+    #     while len(nodelist)!=0:
+    #         node=nodelist.pop(0)
+    #         if node.id in freqdict.keys():
+    #             freqdict[node.id]+=node.count
+    #         else:
+    #             freqdict[node.id]=node.count
+    #         for n in node.children:
+    #             nodelist.append(n)
+
+
+    #     for no in tree.children:
+    #         for node in no.children:
+    #             self.findsubpattern(prefix+[no.id],node,tree)
+
+    # def judgepath(self,nodeid,node):
+    #     if node.id=="Root":
+    #         return False
+    #     if nodeid==node.id:
+    #         return True
+    #     else:
+    #         return self.judgepath(nodeid,node.parent)
+    #
+    #
+    # def findsubpattern(self,prefix,node,contree):
+    #     freq=0
+    #     nodelist=[]
+    #     for n in contree.children:
+    #         nodelist.append(n)
+    #     while len(nodelist)!=0:
+    #         snode=nodelist.pop(0)
+    #         if snode.id==node.id:
+    #             flag=True
+    #             for i in reversed(prefix[1:]):
+    #                 if not self.judgepath(i,snode.parent):
+    #                     flag=False
+    #                     break
+    #             if flag:
+    #                 freq+=snode.count
+    #         else:
+    #             for n in snode.children:
+    #                      nodelist.append(n)
+    #     if freq>=self.minsup:
+    #         self.patterns.append([prefix+[node.id],freq])
+    #         childlist=[]+node.children
+    #         for i in childlist:
+    #             self.addchildren(i,childlist)
+    #         for i in childlist:
+    #             self.findsubpattern(prefix+[node.id],i,contree)
+    #
+    # def addchildren(self,node,li):
+    #     for i in node.children:
+    #         li.append(i)
+    #         self.addchildren(i,li)
+
+
     def buildpatterns(self):
         for i in self.linktable.keys():
             self.createcontree(i,[i],self.linktable)
@@ -145,7 +211,7 @@ with open("D:/new.txt","r",encoding="utf-8") as f:
         if not line:
             break
         c=line.split(" ")
-        if "文字版" in c and "的" in c: #and "的" in c and "新":
+        if "为" in c and "在" in c: #and "的" in c and "新":
              count+=1
         dataset.append(c)
         total+=1
@@ -163,13 +229,15 @@ with open("D:/new.txt","r",encoding="utf-8") as f:
 
 print(count)
 minsup=int(total*0.05)
+# total=len(dataset)
 #minsup=2
-print(minsup)
+#print(minsup)
 fp=FP_Growth(minsup,dataset)
 fp.createfreqset()
 fp.createfptree()
 #fp.createcontree("文字版")
 fp.buildpatterns()
 b=time.time()
-print(b-a)
-print(len(fp.patterns))
+
+print("Minsupoort is %d in %d transactions" % (minsup,total))
+print("Generate %d set in %.3f seconds" % (len(fp.patterns),b-a))

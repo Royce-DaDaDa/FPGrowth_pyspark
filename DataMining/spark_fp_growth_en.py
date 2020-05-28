@@ -14,6 +14,7 @@ class FPNode:
         indent+=2
         for node in self.children:
             node.show(indent)
+
     def mergenodes(self):
         ids=[i.id for i in self.children]
         if len(ids) == 0:
@@ -36,13 +37,15 @@ class FPNode:
 
 
 class FP_Growth:
-    def __init__(self,minsup,dataset,freqset):
+    def __init__(self,minsup,dataset,freqset,partitioner,groupid):
         self.minsup=minsup
         self.freqset=freqset
         self.dataset=dataset
         self.FPTree=FPNode("Root",0,None)
         self.patterns=[]
         self.linktable={i[0]: [] for i in sorted(self.freqset.items(), key=lambda x: x[1])}
+        self.partitioner=partitioner
+        self.groupid=groupid
     def createfreqset(self):
         rawset={}
         for row in self.dataset:
@@ -60,8 +63,8 @@ class FP_Growth:
 
     def createfptree(self):
         for row in self.dataset:
-            row=[i for i in row if i in self.freqset.keys()]
-            row.sort(key=self.getfreq,reverse=True)
+            # row=[i for i in row if i in self.freqset.keys()]
+            # row.sort(key=self.getfreq,reverse=True)
             pnode=self.FPTree
             for item in row:
                 flag=False
@@ -99,7 +102,7 @@ class FP_Growth:
         contable={}
         freqdict={}
         self.createcontable(contree,contable,freqdict)
-        contable=dict(sorted(contable.items(),key=lambda x:self.freqset[x[0]]))
+        contable=dict(sorted(contable.items(),key=lambda x:freqdict[x[0]]))
         for (k,v) in freqdict.items():
             if v>=self.minsup:
                 self.patterns.append((tuple(prefix+[k]),v))
@@ -130,7 +133,20 @@ class FP_Growth:
 
     def buildpatterns(self):
         for i in self.linktable.keys():
-            self.createcontree(i,[i],self.linktable)
+            if self.partitioner.getPartition(i) == self.groupid:
+                self.createcontree(i,[i],self.linktable)
+
+class HashPartitioner:
+    def __init__(self,num):
+        self.numPartitions=num
+
+    def string_hashcode(self,s):
+        h = 0
+        for c in s:
+            h = (31 * h + ord(c)) & 0xFFFFFFFF
+        return ((h + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+    def getPartition(self,t):
+        return self.string_hashcode(t) % self.numPartitions
 
 
 starttime=time.time()
@@ -148,28 +164,48 @@ def filtermin(item):
 freqset = textfile.flatMap(lambda line: line.split(" "))\
     .map(lambda word:(word,1))\
     .reduceByKey(lambda a, b : a + b)\
-    .filter(filtermin)\
-    .sortBy(lambda x:x[1],False)
-broadfreq=sc.broadcast(freqset.collectAsMap()).value
-def buildfpgrowth(t):
-    fp = FP_Growth(0, t, broadfreq)
+    .filter(filtermin).sortBy(lambda x:x[1],False)\
+    .collectAsMap()
+#broadfreq=sc.broadcast(freqset.collectAsMap()).value
+def buildfpgrowth(minsup,t):
+    fp = FP_Growth(minsup,t[1],freqset,partitioner,t[0])
     fp.createfptree()
     fp.buildpatterns()
     return fp.patterns
-rawpattern = textfile.flatMap(lambda line: [line.split(" ")]).repartition(4).mapPartitions(buildfpgrowth).reduceByKey(lambda a, b : a + b).filter(filtermin).collect()
-
+def createconset(row,freqset,partitioner):
+    output={}
+    row=[i for i in row if i in freqset.keys()]
+    row.sort(key=lambda x:freqset[x],reverse=True)
+    length=len(row)
+    n=length-1
+    while n>=0:
+        part = partitioner.getPartition(row[n])
+        if part not in output.keys():
+            output[part]=row[:n+1]
+        n-=1
+    return output.items()
+partitioner=HashPartitioner(10)
+def to_list(a):
+    return [a]
+def append(a, b):
+    a.append(b)
+    return a
+def extend(a, b):
+    a.extend(b)
+    return a
+rawpattern = textfile.flatMap(lambda line: [line.split(" ")])\
+        .flatMap(lambda x:createconset(x,freqset,partitioner))\
+        .combineByKey(to_list, append, extend,partitioner.numPartitions)\
+        .flatMap(lambda x:buildfpgrowth(minsup,x)).collect()
 f = open('/home/spark_test/patterns.txt','w')
 count=0
 for i in rawpattern:
     f.write(str(i))
     f.write("\n")
     count+=1
-
 f.write("Total: %d" % count)
-
 f.close()
 sc.stop()
 endtime=time.time()
-
 print("Minsupoort is %d in %d transactions" % (minsup,length))
 print("Generate %d set in %.3f seconds" % (count,endtime-starttime))
